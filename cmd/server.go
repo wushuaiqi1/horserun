@@ -3,7 +3,8 @@ package main
 import (
 	"context"
 	"github.com/gin-gonic/gin"
-	"horserun/biz"
+	"horserun/config"
+	"horserun/wire"
 	"log"
 	"net/http"
 	"os"
@@ -13,10 +14,17 @@ import (
 )
 
 func main() {
-	// 创建授权码管理器
-	manager := biz.NewManager("./data")
-	// 创建处理器
-	handler := biz.NewHandler(manager)
+	// 加载配置
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		log.Fatalf("加载配置失败：%v", err)
+	}
+
+	// 使用Wire进行依赖注入
+	handler, err := wire.NewApp()
+	if err != nil {
+		log.Fatalf("初始化应用失败：%v", err)
+	}
 
 	// 公开接口路由器 - 监听公网端口
 	publicRouter := gin.Default()
@@ -42,17 +50,21 @@ func main() {
 	}
 
 	// 启动公开服务（监听所有网卡）
-	publicAddr := ":19001"
+	publicAddr := cfg.Server.PublicAddr
 	publicServer := &http.Server{
-		Addr:    publicAddr,
-		Handler: publicRouter,
+		Addr:         publicAddr,
+		Handler:      publicRouter,
+		ReadTimeout:  cfg.Server.ReadTimeout,
+		WriteTimeout: cfg.Server.WriteTimeout,
 	}
 
 	// 启动内部服务（仅监听本地回环地址）
-	internalAddr := "127.0.0.1:19002" // 或者使用 Unix Socket
+	internalAddr := cfg.Server.InternalAddr
 	internalServer := &http.Server{
-		Addr:    internalAddr,
-		Handler: internalRouter,
+		Addr:         internalAddr,
+		Handler:      internalRouter,
+		ReadTimeout:  cfg.Server.ReadTimeout,
+		WriteTimeout: cfg.Server.WriteTimeout,
 	}
 
 	// 优雅关闭

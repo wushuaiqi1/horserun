@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"strconv"
 	"time"
+
+	"horserun/internal/model"
 )
 
 // Handler HTTP 接口处理器
@@ -105,8 +107,8 @@ func (h *Handler) Generate(c *gin.Context) {
 		return
 	}
 
-	validityType := ValidityType(req.Type)
-	if validityType < Validity3Days || validityType > Validity1Year {
+	validityType := model.ValidityType(req.Type)
+	if validityType < model.Validity3Days || validityType > model.Validity1Year {
 		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "无效的有效期类型，请输入 1-4"})
 		return
 	}
@@ -153,7 +155,7 @@ func (h *Handler) Activate(c *gin.Context) {
 
 	c.JSON(http.StatusOK, ActivateResponse{
 		Code:        authCode.Code,
-		Type:        ValidityType(authCode.Type).String(),
+		Type:        model.ValidityType(authCode.Type).String(),
 		ExpiryTime:  authCode.ExpiryTime,
 		ActivatedAt: authCode.ActivatedAt,
 		Remaining:   authCode.RemainingTime().Round(time.Hour).String(),
@@ -181,7 +183,7 @@ func (h *Handler) Validate(c *gin.Context) {
 
 	c.JSON(http.StatusOK, ValidateResponse{
 		Code:       authCode.Code,
-		Type:       ValidityType(authCode.Type).String(),
+		Type:       model.ValidityType(authCode.Type).String(),
 		ExpiryTime: authCode.ExpiryTime,
 		Remaining:  authCode.RemainingTime().Round(time.Second).String(),
 		IsValid:    authCode.IsValid(),
@@ -209,7 +211,7 @@ func (h *Handler) GetCode(c *gin.Context) {
 
 	c.JSON(http.StatusOK, CodeInfo{
 		Code:        authCode.Code,
-		Type:        ValidityType(authCode.Type).String(),
+		Type:        model.ValidityType(authCode.Type).String(),
 		ExpiryTime:  authCode.ExpiryTime,
 		IsActive:    authCode.IsActive,
 		ActivatedAt: authCode.ActivatedAt,
@@ -231,7 +233,7 @@ func (h *Handler) ListCodes(c *gin.Context) {
 
 		codeInfos = append(codeInfos, CodeInfo{
 			Code:        code.Code,
-			Type:        ValidityType(code.Type).String(),
+			Type:        model.ValidityType(code.Type).String(),
 			ExpiryTime:  code.ExpiryTime,
 			IsActive:    code.IsActive,
 			ActivatedAt: code.ActivatedAt,
@@ -263,14 +265,14 @@ func (h *Handler) DeleteCode(c *gin.Context) {
 }
 
 // ParseValidityType 通过字符串解析有效期类型
-func ParseValidityType(s string) (ValidityType, error) {
+func ParseValidityType(s string) (model.ValidityType, error) {
 	typeNum, err := strconv.Atoi(s)
 	if err != nil {
 		return 0, err
 	}
 
-	validityType := ValidityType(typeNum)
-	if validityType < Validity3Days || validityType > Validity1Year {
+	validityType := model.ValidityType(typeNum)
+	if validityType < model.Validity3Days || validityType > model.Validity1Year {
 		return 0, errors.New("无效的有效期类型")
 	}
 

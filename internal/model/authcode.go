@@ -1,4 +1,4 @@
-package biz
+package model
 
 import (
 	"encoding/json"
@@ -53,11 +53,14 @@ const TimeFormat = "2006-01-02 15:04:05"
 
 // AuthCode 授权码结构
 type AuthCode struct {
-	Code        string       `json:"code"`                   // 授权码
-	Type        ValidityType `json:"type"`                   // 有效期类型
-	ExpiryTime  time.Time    `json:"expiry_time"`            // 过期时间
-	IsActive    bool         `json:"is_active"`              // 是否激活
-	ActivatedAt *time.Time   `json:"activated_at,omitempty"` // 激活时间
+	ID          uint         `gorm:"primaryKey" json:"id"`             // 主键
+	Code        string       `gorm:"uniqueIndex;size:32" json:"code"`  // 授权码
+	Type        ValidityType `gorm:"type:integer" json:"type"`         // 有效期类型
+	ExpiryTime  time.Time    `json:"expiry_time"`                      // 过期时间
+	IsActive    bool         `json:"is_active"`                        // 是否激活
+	ActivatedAt *time.Time   `json:"activated_at,omitempty"`           // 激活时间
+	CreatedAt   time.Time    `gorm:"autoCreateTime" json:"created_at"` // 创建时间
+	UpdatedAt   time.Time    `gorm:"autoUpdateTime" json:"updated_at"` // 更新时间
 }
 
 // MarshalJSON 自定义 JSON 序列化

@@ -3,14 +3,14 @@ package biz
 import (
 	"crypto/rand"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
-	"os"
-	"path/filepath"
 	"sync"
 	"time"
+
+	"horserun/internal/di"
+	"horserun/internal/model"
 )
 
 var (
@@ -22,22 +22,17 @@ var (
 
 // Manager 授权码管理器
 type Manager struct {
-	mu      sync.RWMutex
-	codes   map[string]*AuthCode
-	dataDir string
+	mu    sync.RWMutex
+	codes map[string]*model.AuthCode
 }
 
 // NewManager 创建授权码管理器
-func NewManager(dataDir string) *Manager {
+func NewManager() *Manager {
 	m := &Manager{
-		codes:   make(map[string]*AuthCode),
-		dataDir: dataDir,
+		codes: make(map[string]*model.AuthCode),
 	}
 
-	// 初始化数据目录并加载已有数据
-	if err := m.initDataDir(); err != nil {
-		log.Printf("警告：初始化数据目录失败：%v\n", err)
-	}
+	// 从数据库加载授权码
 	if err := m.LoadCodes(); err != nil {
 		log.Printf("警告：加载授权码失败：%v\n", err)
 	}
@@ -45,38 +40,15 @@ func NewManager(dataDir string) *Manager {
 	return m
 }
 
-// initDataDir 初始化数据目录
-func (m *Manager) initDataDir() error {
-	if _, err := os.Stat(m.dataDir); os.IsNotExist(err) {
-		if err := os.MkdirAll(m.dataDir, 0755); err != nil {
-			return fmt.Errorf("创建数据目录失败：%w", err)
-		}
-	}
-	return nil
-}
-
-// getDataFilePath 获取数据文件路径
-func (m *Manager) getDataFilePath() string {
-	return filepath.Join(m.dataDir, "authcodes.json")
-}
-
-// LoadCodes 从文件加载授权码
+// LoadCodes 从数据库加载授权码
 func (m *Manager) LoadCodes() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	filePath := m.getDataFilePath()
-	data, err := os.ReadFile(filePath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil // 文件不存在时返回空，不报错
-		}
-		return fmt.Errorf("读取文件失败：%w", err)
-	}
-
-	var codes []*AuthCode
-	if err := json.Unmarshal(data, &codes); err != nil {
-		return fmt.Errorf("解析 JSON 失败：%w", err)
+	var codes []*model.AuthCode
+	result := di.DB.Find(&codes)
+	if result.Error != nil {
+		return fmt.Errorf("从数据库加载授权码失败：%w", result.Error)
 	}
 
 	// 将加载的授权码存入内存
@@ -88,27 +60,19 @@ func (m *Manager) LoadCodes() error {
 	return nil
 }
 
-// SaveCodes 保存授权码到文件
+// SaveCodes 保存授权码到数据库
 func (m *Manager) SaveCodes() error {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	codes := make([]*AuthCode, 0, len(m.codes))
 	for _, code := range m.codes {
-		codes = append(codes, code)
+		result := di.DB.Save(code)
+		if result.Error != nil {
+			return fmt.Errorf("保存授权码到数据库失败：%w", result.Error)
+		}
 	}
 
-	data, err := json.MarshalIndent(codes, "", "  ")
-	if err != nil {
-		return fmt.Errorf("序列化 JSON 失败：%w", err)
-	}
-
-	filePath := m.getDataFilePath()
-	if err := os.WriteFile(filePath, data, 0644); err != nil {
-		return fmt.Errorf("写入文件失败：%w", err)
-	}
-
-	log.Printf("成功保存 %d 个授权码到 %s\n", len(codes), filePath)
+	log.Printf("成功保存 %d 个授权码到数据库\n", len(m.codes))
 	return nil
 }
 
@@ -120,7 +84,7 @@ func (m *Manager) saveIfNeeded() {
 }
 
 // GenerateCode 生成授权码
-func (m *Manager) GenerateCode(validityType ValidityType) (*AuthCode, error) {
+func (m *Manager) GenerateCode(validityType model.ValidityType) (*model.AuthCode, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -133,23 +97,26 @@ func (m *Manager) GenerateCode(validityType ValidityType) (*AuthCode, error) {
 	// 计算过期时间
 	expiryTime := time.Now().Add(validityType.Duration())
 
-	authCode := &AuthCode{
+	authCode := &model.AuthCode{
 		Code:       code,
 		Type:       validityType,
 		ExpiryTime: expiryTime,
 		IsActive:   false,
 	}
 
-	m.codes[code] = authCode
+	// 保存到数据库
+	result := di.DB.Create(authCode)
+	if result.Error != nil {
+		return nil, fmt.Errorf("保存授权码到数据库失败：%w", result.Error)
+	}
 
-	// 保存到文件
-	go m.saveIfNeeded()
+	m.codes[code] = authCode
 
 	return authCode, nil
 }
 
 // ActivateCode 激活授权码
-func (m *Manager) ActivateCode(code string) (*AuthCode, error) {
+func (m *Manager) ActivateCode(code string) (*model.AuthCode, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -170,14 +137,17 @@ func (m *Manager) ActivateCode(code string) (*AuthCode, error) {
 	authCode.IsActive = true
 	authCode.ActivatedAt = &now
 
-	// 保存到文件
-	go m.saveIfNeeded()
+	// 保存到数据库
+	result := di.DB.Save(authCode)
+	if result.Error != nil {
+		return nil, fmt.Errorf("保存授权码到数据库失败：%w", result.Error)
+	}
 
 	return authCode, nil
 }
 
 // ValidateCode 验证授权码
-func (m *Manager) ValidateCode(code string) (*AuthCode, error) {
+func (m *Manager) ValidateCode(code string) (*model.AuthCode, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -198,7 +168,7 @@ func (m *Manager) ValidateCode(code string) (*AuthCode, error) {
 }
 
 // GetCode 获取授权码信息
-func (m *Manager) GetCode(code string) (*AuthCode, error) {
+func (m *Manager) GetCode(code string) (*model.AuthCode, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -211,11 +181,11 @@ func (m *Manager) GetCode(code string) (*AuthCode, error) {
 }
 
 // ListCodes 列出所有授权码
-func (m *Manager) ListCodes() []*AuthCode {
+func (m *Manager) ListCodes() []*model.AuthCode {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	codes := make([]*AuthCode, 0, len(m.codes))
+	codes := make([]*model.AuthCode, 0, len(m.codes))
 	for _, code := range m.codes {
 		codes = append(codes, code)
 	}
@@ -228,14 +198,18 @@ func (m *Manager) DeleteCode(code string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if _, exists := m.codes[code]; !exists {
+	authCode, exists := m.codes[code]
+	if !exists {
 		return ErrCodeNotFound
 	}
 
-	delete(m.codes, code)
+	// 从数据库删除
+	result := di.DB.Delete(authCode)
+	if result.Error != nil {
+		return fmt.Errorf("从数据库删除授权码失败：%w", result.Error)
+	}
 
-	// 保存到文件
-	go m.saveIfNeeded()
+	delete(m.codes, code)
 
 	return nil
 }

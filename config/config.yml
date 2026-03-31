@@ -1,0 +1,4 @@
+
+
+database:
+  dsn: root:123456@tcp(152.136.253.39)/horserun?charset=utf8mb4&parseTime=True&loc=Local
